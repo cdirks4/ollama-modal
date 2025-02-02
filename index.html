@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Ollama API Demo</title>
+    <style>
+      .response {
+        margin: 10px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Ollama API Demo</h1>
+    <div>
+      <textarea id="prompt" rows="4" cols="50">
+Write a Python function to calculate fibonacci numbers</textarea
+      >
+      <br />
+      <button onclick="generate()">Generate</button>
+    </div>
+    <div id="responses"></div>
+
+    <script>
+      async function generate() {
+        const prompt = document.getElementById('prompt').value
+        const responsesDiv = document.getElementById('responses')
+        responsesDiv.innerHTML = 'Loading...'
+
+        try {
+          const responses = await generateText(prompt)
+          responsesDiv.innerHTML = responses
+            .map(
+              (response, index) => `
+                    <div class="response">
+                        <h3>GPU ${index + 1}</h3>
+                        <pre>${response}</pre>
+                    </div>
+                `
+            )
+            .join('')
+        } catch (error) {
+          responsesDiv.innerHTML = `Error: ${error.message}`
+        }
+      }
+    </script>
+    <script src="client.js"></script>
+  </body>
+</html>

@@ -21,3 +21,7 @@ Run large language models on Modal's cloud infrastructure using Ollama.
     # underlying images, defaulting to deepseek:1. First run may take
     # several minutes while the model downloads. See
     # https://ollama.com/library for other options.
+
+## Setup
+
+1. Clone the repository:

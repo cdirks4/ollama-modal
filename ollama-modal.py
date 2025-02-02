@@ -2,10 +2,13 @@ import modal
 import os
 import subprocess
 import time
+import asyncio
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from modal import build, enter, method
 
-MODEL = "deepseek-r1:671b"  # Using the correct model name format
+MODEL = "deepseek-r1:32b"  # Using the correct model name format
 
 def pull(model: str = MODEL):
     subprocess.run(["systemctl", "daemon-reload"])
@@ -38,14 +41,53 @@ app = modal.App(name="ollama", image=image)
 with image.imports():
     import ollama
 
-@app.cls(gpu="H100", container_idle_timeout=300)
+web_app = FastAPI()
+web_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@web_app.get("/")
+async def root():
+    return {"status": "ok", "model": MODEL}
+
+@web_app.post("/generate")
+async def generate(text: str):
+    ollama = Ollama()
+    responses = []
+    async def process_parallel():
+        tasks = []
+        for _ in range(8):
+            tasks.append(ollama.infer.remote_gen(text))
+        return await asyncio.gather(*tasks)
+    
+    responses = await process_parallel()
+    return {"responses": [list(r) for r in responses]}
+
+# Mount the FastAPI app
+stub = modal.Stub(name="ollama-api", image=image)
+
+@stub.function(gpu="H100",
+    container_idle_timeout=None,
+    concurrency_limit=8)
+@modal.asgi_app()
+def api():
+    return web_app
+
+@app.cls(
+    gpu="H100",
+    container_idle_timeout=None,  # No timeout
+    concurrency_limit=8,  # Use exactly 8 H100s
+)
 class Ollama:
     @enter()
     def load(self):
-        # Pull model on every container start
         subprocess.run(["systemctl", "start", "ollama"])
-        time.sleep(5)  # Wait for ollama to start
-        pull(MODEL)  # Pull model before any inference
+        time.sleep(5)
+        pull(MODEL)
 
     @method()
     def infer(self, text: str):
@@ -68,5 +110,20 @@ def main(text: str = "Why is the sky blue?", lookup: bool = False):
         ollama = modal.Cls.lookup("ollama", "Ollama")
     else:
         ollama = Ollama()
-    for chunk in ollama.infer.remote_gen(text):
-        print(chunk, end='', flush=False)
+    
+    # Create 8 parallel instances all working on the same text
+    async def process_parallel():
+        tasks = []
+        for _ in range(8):  # Always use 8 instances
+            tasks.append(ollama.infer.remote_gen(text))
+        return await asyncio.gather(*tasks)
+    
+    # Run all 8 instances and collect responses
+    responses = asyncio.run(process_parallel())
+    
+    # Print responses from all 8 instances
+    for i, response in enumerate(responses):
+        print(f"\nH100 GPU {i + 1} Response:")
+        for chunk in response:
+            print(chunk, end='', flush=True)
+        print("\n" + "-"*50)  # Separator between responses
